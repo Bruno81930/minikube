@@ -1,6 +1,6 @@
 name: PR_Verified
 on:
-  pull_request:
+  workflow_dispatch:
     paths:
       - "**.go"
       - "**.yml"
