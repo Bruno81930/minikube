@@ -1,6 +1,6 @@
 name: Special
 on:
-  push:
+  pull_request:
     paths:
       - "**.go"
       - "**.yml"
