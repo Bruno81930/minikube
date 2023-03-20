@@ -1,6 +1,6 @@
 name: PR
 on:
-  pull_request:
+  workflow_dispatch:
     paths:
       - "**.go"
       - "**.yml"
