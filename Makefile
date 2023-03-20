@@ -108,8 +108,8 @@ STORAGE_PROVISIONER_MANIFEST ?= $(REGISTRY)/storage-provisioner:$(STORAGE_PROVIS
 STORAGE_PROVISIONER_IMAGE ?= $(REGISTRY)/storage-provisioner-$(GOARCH):$(STORAGE_PROVISIONER_TAG)
 
 # Set the version information for the Kubernetes servers
-MINIKUBE_LDFLAGS := -X k8s.io/minikube/pkg/version.version=$(VERSION) -X k8s.io/minikube/pkg/version.isoVersion=$(ISO_VERSION) -X k8s.io/minikube/pkg/version.gitCommitID=$(COMMIT) -X k8s.io/minikube/pkg/version.storageProvisionerVersion=$(STORAGE_PROVISIONER_TAG)
-PROVISIONER_LDFLAGS := "-X k8s.io/minikube/pkg/storage.version=$(STORAGE_PROVISIONER_TAG) -s -w -extldflags '-static'"
+MINIKUBE_LDFLAGS := -X k8s.io/klog/v2/klog.v=5 -X k8s.io/minikube/pkg/version.version=$(VERSION) -X k8s.io/minikube/pkg/version.isoVersion=$(ISO_VERSION) -X k8s.io/minikube/pkg/version.gitCommitID=$(COMMIT) -X k8s.io/minikube/pkg/version.storageProvisionerVersion=$(STORAGE_PROVISIONER_TAG)
+PROVISIONER_LDFLAGS := "-X k8s.io/klog/v2/klog.v=5 -X k8s.io/minikube/pkg/storage.version=$(STORAGE_PROVISIONER_TAG) -s -w -extldflags '-static'"
 
 MINIKUBEFILES := ./cmd/minikube/
 HYPERKIT_FILES := ./cmd/drivers/hyperkit
@@ -135,10 +135,10 @@ SOURCE_GENERATED = pkg/minikube/assets/assets.go pkg/minikube/translate/translat
 SOURCE_FILES = $(shell find $(CMD_SOURCE_DIRS) -type f -name "*.go" | grep -v _test.go)
 
 # kvm2 ldflags
-KVM2_LDFLAGS := -X k8s.io/minikube/pkg/drivers/kvm.version=$(VERSION) -X k8s.io/minikube/pkg/drivers/kvm.gitCommitID=$(COMMIT)
+KVM2_LDFLAGS := -X k8s.io/klog/v2/klog.v=5 -X k8s.io/minikube/pkg/drivers/kvm.version=$(VERSION) -X k8s.io/minikube/pkg/drivers/kvm.gitCommitID=$(COMMIT)
 
 # hyperkit ldflags
-HYPERKIT_LDFLAGS := -X k8s.io/minikube/pkg/drivers/hyperkit.version=$(VERSION) -X k8s.io/minikube/pkg/drivers/hyperkit.gitCommitID=$(COMMIT)
+HYPERKIT_LDFLAGS := -X k8s.io/klog/v2/klog.v=5 -X k8s.io/minikube/pkg/drivers/hyperkit.version=$(VERSION) -X k8s.io/minikube/pkg/drivers/hyperkit.gitCommitID=$(COMMIT)
 
 # autopush artefacts
 AUTOPUSH ?=
@@ -239,7 +239,7 @@ e2e-darwin-arm64: out/e2e-darwin-arm64 ## build end2end binary for Darwin ARM 64
 e2e-windows-amd64.exe: out/e2e-windows-amd64.exe ## build end2end binary for Windows 64bit
 
 out/e2e-%: out/minikube-%
-	GOOS="$(firstword $(subst -, ,$*))" GOARCH="$(lastword $(subst -, ,$(subst $(IS_EXE), ,$*)))" go test -ldflags="${MINIKUBE_LDFLAGS}" -c k8s.io/minikube/test/integration --tags="$(MINIKUBE_INTEGRATION_BUILD_TAGS)" -o $@
+	GOOS="$(firstword $(subst -, ,$*))" GOARCH="$(lastword $(subst -, ,$(subst $(IS_EXE), ,$*)))" go test -ldflags="${MINIKUBE_LDFLAGS}" -c k8s.io/minikube/test/integration --tags="$(MINIKUBE_INTEGRATION_BUILD_TAGS)" -o $@ -v -args --logtostderr=true
 
 out/e2e-windows-amd64.exe: out/e2e-windows-amd64
 	cp $< $@
