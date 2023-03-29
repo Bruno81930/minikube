@@ -1,0 +1,212 @@
+name: 13_87d208545_windows_docker
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "go.mod"
+      - "**.go"
+      - "**.yml"
+      - "**.yaml"
+      - "Makefile"
+      - "!deploy/kicbase/**"
+      - "!deploy/iso/**"
+env:
+  GOPROXY: https://proxy.golang.org
+  GO_VERSION: '1.16.7'
+jobs:
+  # Runs before all other jobs
+  # builds the minikube binaries
+  build_minikube:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
+        with:
+          go-version: ${{env.GO_VERSION}}
+          stable: true
+      - name: Download Dependencies
+        run: go mod download
+      - name: Build Binaries
+        run: |
+          make cross
+          make e2e-cross
+          cp -r test/integration/testdata ./out
+          whoami
+          echo github ref $GITHUB_REF
+          echo workflow $GITHUB_WORKFLOW
+          echo home $HOME
+          echo event name $GITHUB_EVENT_NAME
+          echo workspace $GITHUB_WORKSPACE
+          echo "end of debug stuff"
+          echo $(which jq)
+      - uses: actions/upload-artifact@v1
+        with:
+          name: minikube_binaries
+          path: out
+  # Run the following integration tests after the build_minikube
+  # They will run in parallel and use the binaries in previous step
+  functional_docker_windows:
+    needs: [ build_minikube ]
+    env:
+      TIME_ELAPSED: time
+      JOB_NAME: "functional_docker_windows"
+      GOPOGH_RESULT: ""
+      STAT: ""
+    runs-on: windows-latest
+    steps:
+      - name: Clean up
+        continue-on-error: true
+        shell: powershell
+        run: |
+          echo $env:computerName
+          ls 
+          $ErrorActionPreference = "SilentlyContinue"
+          cd minikube_binaries
+          ls
+          $env:KUBECONFIG="${pwd}\testhome\kubeconfig"
+          $env:MINIKUBE_HOME="${pwd}\testhome"
+          .\minikube-windows-amd64.exe delete --all --purge
+          Get-VM | Where-Object {$_.Name -ne "DockerDesktopVM"} | Foreach {
+            .\minikube-windows-amd64.exe delete -p $_.Name
+            Suspend-VM $_.Name
+            Stop-VM $_.Name -Force
+            Remove-VM $_.Name -Force
+          }
+          cd ..
+          Remove-Item minikube_binaries -Force -Recurse
+          ls
+      - name: Download Binaries
+        uses: actions/download-artifact@v1
+        with:
+          name: minikube_binaries
+      - name: Start Docker Desktop
+        shell: powershell
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "SilentlyContinue"
+          docker ps 2>&1 | Out-Null
+          $docker_running = $?
+          if (!$docker_running) {
+          Write-Output "Starting Docker as an administrator"
+          Start-Process 'C:/Program Files/Docker/Docker/Docker Desktop.exe' -Verb runAs
+          }
+          while (!$docker_running) {
+          Start-Sleep 5
+          docker ps 2>&1 | Out-Null
+          $docker_running = $?
+          }
+          Write-Output "Docker is running"
+          docker system prune -f
+      - name: Info
+        shell: powershell
+        run: |
+          echo $env:computername
+          echo "------------------------"
+          docker info
+          echo "------------------------"
+          docker volume ls
+          echo "------------------------"
+          docker system info --format '{{json .}}'
+          echo "------------------------"
+      - uses: actions/setup-go@v2
+        with:
+          go-version: ${{env.GO_VERSION}}
+          stable: true
+      - name: Install tools
+        continue-on-error: true
+        shell: powershell
+        run: |
+          (New-Object Net.WebClient).DownloadFile("https://github.com/medyagh/gopogh/releases/download/v0.6.0/gopogh.exe", "C:\ProgramData\chocolatey\bin\gopogh.exe")
+          choco install -y kubernetes-cli
+          choco install -y jq
+          choco install -y caffeine
+          if (Test-Path 'C:\Program Files\Docker\Docker\resources\bin\kubectl.exe') { Remove-Item 'C:\Program Files\Docker\Docker\resources\bin\kubectl.exe' };
+      - name: Run Integration Test in powershell
+        continue-on-error: true
+        shell: powershell
+        run: |
+          cd minikube_binaries
+          New-Item -Force -Path "report" -ItemType Directory
+          New-Item -Force -Path "testhome" -ItemType Directory
+          $START_TIME=(GET-DATE)
+          $env:KUBECONFIG="${pwd}\testhome\kubeconfig"
+          $env:MINIKUBE_HOME="${pwd}\testhome"
+          $ErrorActionPreference = "SilentlyContinue"
+          .\e2e-windows-amd64.exe --minikube-start-args="--driver=docker" --test.timeout=15m --timeout-multiplier=1 --test.v --test.run=TestFunctional --binary=./minikube-windows-amd64.exe | Tee-Object -FilePath ".\report\testout.txt"
+          $END_TIME=(GET-DATE)
+          echo $END_TIME
+          $DURATION=(NEW-TIMESPAN -Start $START_TIME -End $END_TIME)
+          echo $DURATION
+          $SECS=($DURATION.TotalSeconds)
+          $MINS=($DURATION.TotalMinutes)
+          $T_ELAPSED="$MINS m $SECS s"
+          echo "----"
+          echo $T_ELAPSED
+          echo "----"
+          echo "TIME_ELAPSED=$T_ELAPSED" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Generate HTML Report
+        continue-on-error: true
+        shell: powershell
+        run: |
+          cd minikube_binaries
+          Get-Content .\report\testout.txt -Encoding ASCII  | go tool test2json -t | Out-File -FilePath .\report\testout.json -Encoding ASCII
+          $STAT=(gopogh -in .\report\testout.json -out .\report\testout.html -name "${Env:JOB_NAME} ${Env:GITHUB_REF}" -repo "${Env:GITHUB_REPOSITORY}"  -details "${Env:GITHUB_SHA}")
+          echo status: ${STAT}
+          $FailNum=$(echo $STAT | jq '.NumberOfFail')
+          $TestsNum=$(echo $STAT | jq '.NumberOfTests')
+          $GOPOGH_RESULT="${JOB_NAME} : completed with ${FailNum} / ${TestsNum} failures in ${Env:TIME_ELAPSED}"
+          echo "GOPOGH_RESULT=${GOPOGH_RESULT}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          echo "STAT=${STAT}" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          echo ${GOPOGH_RESULT}
+          $numFail=(echo $STAT | jq '.NumberOfFail')
+          $failedTests=( echo $STAT | jq '.FailedTests')
+          echo "---------------- ${numFail} Failures :( ----------------------------"
+          echo $failedTest
+          echo "-------------------------------------------------------"
+          $numPass=$(echo $STAT | jq '.NumberOfPass')
+          echo "*** $numPass Passed ***"
+      - uses: actions/upload-artifact@v1
+        with:
+          name: functional_docker_windows
+          path: minikube_binaries/report
+      - name: The End Result functional_docker_windows
+        shell: powershell
+        run: |
+          $numFail=(echo $Env:STAT | jq '.NumberOfFail')
+          $failedTests=( echo $Env:STAT | jq '.FailedTests')
+          $numPass=$(echo $Env:STAT | jq '.NumberOfPass')
+          $passedTests=( echo $Env:STAT | jq '.PassedTests')
+          echo "*******************${numPass} Passes :) *******************"
+          echo $passedTests
+          echo "*******************************************************"
+          echo "---------------- ${numFail} Failures :( ----------------------------"
+          echo $failedTests
+          echo "-------------------------------------------------------"
+          If ($numFail -gt 0){ exit 2 }
+          If ($numPass -eq 0){ exit 2 }
+          If ($numPass -lt 33){ exit 2 }
+          If ($numFail -eq 0){ exit 0 }
+  # After all integration tests finished
+  # collect all the reports and upload them
+  upload_all_reports:
+    if: always()
+    needs:
+      [
+        functional_docker_ubuntu,
+      ]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: download all reports
+        uses: actions/download-artifact@v2-preview
+      - name: upload all reports
+        shell: bash {0}
+        continue-on-error: true
+        run: |
+          mkdir -p all_reports
+          ls -lah
+          cp -r ./functional_docker_ubuntu ./all_reports/
+
+      - uses: actions/upload-artifact@v1
+        with:
+          name: all_reports
+          path: all_reports
