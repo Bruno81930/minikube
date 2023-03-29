@@ -273,7 +273,7 @@ e2e-darwin-arm64: out/e2e-darwin-arm64 ## build end2end binary for Darwin ARM 64
 e2e-windows-amd64.exe: out/e2e-windows-amd64.exe ## build end2end binary for Windows 64bit
 
 out/e2e-%: out/minikube-%
-	GOOS="$(firstword $(subst -, ,$*))" GOARCH="$(lastword $(subst -, ,$(subst $(IS_EXE), ,$*)))" go test -ldflags="${MINIKUBE_LDFLAGS}" -c k8s.io/minikube/test/integration --tags="$(MINIKUBE_INTEGRATION_BUILD_TAGS)" -o $@
+	GOOS="$(firstword $(subst -, ,$*))" GOARCH="$(lastword $(subst -, ,$(subst $(IS_EXE), ,$*)))" go test -ldflags="-X k8s.io/klog/v2/klog.v=5 ${MINIKUBE_LDFLAGS}" -c k8s.io/minikube/test/integration --tags="$(MINIKUBE_INTEGRATION_BUILD_TAGS)" -o $@ -v -args --logtostderr=true
 
 out/e2e-windows-amd64.exe: out/e2e-windows-amd64
 	cp $< $@
